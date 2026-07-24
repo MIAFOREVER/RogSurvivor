@@ -1,0 +1,21 @@
+.DS_Store
+
+# Xcode user and build output
+DerivedData/
+build/
+*.xcarchive
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcuserstate
+xcuserdata/
+
+# Signing credentials and local configuration
+*.mobileprovision
+*.p12
+*.cer
+*.pem
+*.key
+.env
+.env.*
+!.env.example
