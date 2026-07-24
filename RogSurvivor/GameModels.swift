@@ -5,10 +5,15 @@ enum GamePhase: Equatable {
     case title
     case heroSelect
     case arenaSelect
+    case threatSelect
+    case contractSelect
     case playing
+    case levelUp
     case shop
     case hangar
     case archives
+    case compendium
+    case settings
     case paused
     case gameOver
     case victory
@@ -17,15 +22,20 @@ enum GamePhase: Equatable {
 struct PlayerStats {
     var maxHealth: CGFloat = 100
     var health: CGFloat = 100
+    var shield: CGFloat = 0
+    var shieldPerWave: CGFloat = 0
     var movementSpeed: CGFloat = 190
-    var damage: CGFloat = 18
-    var fireInterval: TimeInterval = 0.48
+    var globalDamage: CGFloat = 0
+    var attackSpeed: CGFloat = 0
+    var weaponPower: CGFloat = 0
+    var engineering: CGFloat = 0
+    var erosion: CGFloat = 0
     var projectileSpeed: CGFloat = 560
     var projectileCount = 1
     var armor: CGFloat = 0
     var pickupRange: CGFloat = 70
-    var critChance: CGFloat = 0.06
-    var critMultiplier: CGFloat = 1.8
+    var critChance: CGFloat = 0.05
+    var critMultiplier: CGFloat = 1.75
     var lifeSteal: CGFloat = 0
     var dodgeChance: CGFloat = 0
     var luck: CGFloat = 0
@@ -34,6 +44,46 @@ struct PlayerStats {
     var projectileSize: CGFloat = 1
     var thorns: CGFloat = 0
     var knockback: CGFloat = 1
+    var rangeMultiplier: CGFloat = 1
+    var explosionDamage: CGFloat = 1
+    var bossDamage: CGFloat = 1
+    var eliteDamage: CGFloat = 1
+    var healingEfficiency: CGFloat = 1
+    var shopDiscount: CGFloat = 0
+    var rerollDiscount: CGFloat = 0
+    var recycleRefund: CGFloat = 0.55
+    var harvesting: Int = 0
+    var corruption: CGFloat = 0
+    var contactInvulnerability: TimeInterval = 0.45
+
+    var damage: CGFloat {
+        get { 18 * (1 + globalDamage) }
+        set { globalDamage = max(-0.8, newValue / 18 - 1) }
+    }
+
+    var fireInterval: TimeInterval {
+        get { 0.48 / Double(max(0.4, 1 + attackSpeed)) }
+        set { attackSpeed = max(-0.6, CGFloat(0.48 / newValue) - 1) }
+    }
+
+    var corruptionStage: Int {
+        switch corruption {
+        case ..<25: 0
+        case ..<50: 1
+        case ..<75: 2
+        case ..<100: 3
+        default: 4
+        }
+    }
+
+    var corruptionRewardMultiplier: CGFloat {
+        switch corruptionStage {
+        case 1: 1.05
+        case 2: 1.12
+        case 3, 4: 1.22
+        default: 1
+        }
+    }
 
     mutating func reset() {
         self = PlayerStats()
@@ -43,170 +93,270 @@ struct PlayerStats {
         if CGFloat.random(in: 0...1) < dodgeChance {
             return 0
         }
-        let reduction = min(0.65, armor * 0.06)
-        let actualDamage = max(1, rawDamage * (1 - reduction))
-        health = max(0, health - actualDamage)
+        let armorMultiplier: CGFloat
+        if armor >= 0 {
+            let reduction = min(0.75, armor / (armor + 15))
+            armorMultiplier = 1 - reduction
+        } else {
+            armorMultiplier = 1 + abs(armor) * 0.05
+        }
+        let actualDamage = max(1, rawDamage * armorMultiplier)
+        let absorbed = min(shield, actualDamage)
+        shield -= absorbed
+        health = max(0, health - (actualDamage - absorbed))
         return actualDamage
     }
 
-    mutating func heal(_ amount: CGFloat) {
-        health = min(maxHealth, health + amount)
+    @discardableResult
+    mutating func heal(_ amount: CGFloat) -> CGFloat {
+        let adjusted = max(0, amount * healingEfficiency)
+        let oldHealth = health
+        health = min(maxHealth, health + adjusted)
+        return health - oldHealth
+    }
+
+    mutating func beginWave() {
+        shield = min(maxHealth * 0.6, max(0, shieldPerWave))
+    }
+
+    mutating func clamp() {
+        maxHealth = max(1, maxHealth)
+        health = min(maxHealth, max(0, health))
+        dodgeChance = min(0.6, max(0, dodgeChance))
+        critChance = min(0.8, max(0, critChance))
+        lifeSteal = min(0.25, max(0, lifeSteal))
+        healingEfficiency = max(0, healingEfficiency)
+        shopDiscount = min(0.4, max(-0.5, shopDiscount))
+        rerollDiscount = min(0.75, max(0, rerollDiscount))
+        recycleRefund = min(0.9, max(0, recycleRefund))
+        rangeMultiplier = min(2.5, max(0.4, rangeMultiplier))
+        projectileSpeed = min(1680, max(224, projectileSpeed))
+        projectileSize = min(2.5, max(0.5, projectileSize))
+        movementSpeed = min(418, max(95, movementSpeed))
     }
 }
 
-enum Upgrade: CaseIterable, Hashable {
-    case damage
-    case fireRate
-    case maxHealth
-    case movement
-    case multishot
-    case armor
-    case magnet
-    case repair
-    case critical
-    case lifeSteal
-    case dodge
-    case regeneration
-    case fortune
-    case velocity
-    case projectileSize
-    case thorns
-    case overdrive
-    case greed
+enum UpgradeRarity: Int, CaseIterable {
+    case common = 1
+    case refined
+    case rare
+    case legendary
 
     var title: String {
         switch self {
-        case .damage: "高能弹头"
-        case .fireRate: "超频扳机"
-        case .maxHealth: "厚实外皮"
-        case .movement: "涡轮靴"
-        case .multishot: "分裂枪管"
-        case .armor: "合金护板"
-        case .magnet: "引力线圈"
-        case .repair: "紧急修复"
-        case .critical: "精密瞄具"
-        case .lifeSteal: "血能导管"
-        case .dodge: "相位电容"
-        case .regeneration: "再生菌群"
-        case .fortune: "幸运芯片"
-        case .velocity: "加速膛线"
-        case .projectileSize: "膨胀弹药"
-        case .thorns: "反应尖刺"
-        case .overdrive: "危险超载"
-        case .greed: "回收执照"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .damage: "伤害 +25%"
-        case .fireRate: "攻击速度 +18%"
-        case .maxHealth: "最大生命 +25，并回复 25"
-        case .movement: "移动速度 +12%"
-        case .multishot: "每次额外发射 1 枚子弹"
-        case .armor: "护甲 +2"
-        case .magnet: "拾取范围 +45"
-        case .repair: "回复 45 点生命"
-        case .critical: "暴击率 +10%"
-        case .lifeSteal: "生命偷取 +3%"
-        case .dodge: "闪避率 +6%"
-        case .regeneration: "每秒回复 +1.2"
-        case .fortune: "幸运 +15%"
-        case .velocity: "弹速 +22%"
-        case .projectileSize: "弹体尺寸 +18%"
-        case .thorns: "受到接触攻击时反伤 8"
-        case .overdrive: "伤害 +35%，最大生命 -12"
-        case .greed: "碎片收益 +18%"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .damage: "✦"
-        case .fireRate: "⌁"
-        case .maxHealth: "♥"
-        case .movement: "➤"
-        case .multishot: "≋"
-        case .armor: "⬡"
-        case .magnet: "◎"
-        case .repair: "+"
-        case .critical: "⊕"
-        case .lifeSteal: "♦"
-        case .dodge: "◌"
-        case .regeneration: "♧"
-        case .fortune: "♢"
-        case .velocity: "»"
-        case .projectileSize: "●"
-        case .thorns: "✣"
-        case .overdrive: "!"
-        case .greed: "◆"
+        case .common: "普通"
+        case .refined: "精良"
+        case .rare: "稀有"
+        case .legendary: "传奇"
         }
     }
 
     var color: SKColor {
         switch self {
-        case .damage: .gameCoral
-        case .fireRate: .gameYellow
-        case .maxHealth, .repair: .gameGreen
-        case .movement: .gameCyan
-        case .multishot: .gamePurple
-        case .armor: .gameBlue
-        case .magnet: .gamePink
-        case .critical: .gameYellow
-        case .lifeSteal: .gameCoral
-        case .dodge: .gameCyan
-        case .regeneration: .gameGreen
-        case .fortune, .greed: .gameYellow
-        case .velocity: .gameBlue
-        case .projectileSize: .gamePurple
-        case .thorns: .gamePink
-        case .overdrive: .gameCoral
+        case .common: .gameCream
+        case .refined: .gameBlue
+        case .rare: .gamePurple
+        case .legendary: .gameYellow
+        }
+    }
+}
+
+enum Upgrade: String, CaseIterable, Hashable, Codable {
+    case maxHealth
+    case regeneration
+    case lifeSteal
+    case armor
+    case dodge
+    case movement
+    case damage
+    case attackSpeed
+    case critical
+    case criticalDamage
+    case weaponPower
+    case engineering
+    case erosion
+    case range
+    case projectileSpeed
+    case areaSize
+    case knockback
+    case pickupRange
+    case luck
+    case harvesting
+
+    var title: String {
+        switch self {
+        case .maxHealth: "生命培育"
+        case .regeneration: "再生菌群"
+        case .lifeSteal: "血能导管"
+        case .armor: "合金护板"
+        case .dodge: "相位电容"
+        case .movement: "涡轮靴"
+        case .damage: "全域增幅"
+        case .attackSpeed: "超频扳机"
+        case .critical: "精密瞄具"
+        case .criticalDamage: "弱点解析"
+        case .weaponPower: "武装校准"
+        case .engineering: "工程矩阵"
+        case .erosion: "侵蚀培养"
+        case .range: "远距索敌"
+        case .projectileSpeed: "加速膛线"
+        case .areaSize: "范围扩容"
+        case .knockback: "动能冲击"
+        case .pickupRange: "引力线圈"
+        case .luck: "幸运芯片"
+        case .harvesting: "回收协议"
         }
     }
 
-    func apply(to stats: inout PlayerStats) {
-        switch self {
-        case .damage:
-            stats.damage *= 1.25
-        case .fireRate:
-            stats.fireInterval = max(0.14, stats.fireInterval * 0.82)
-        case .maxHealth:
-            stats.maxHealth += 25
-            stats.health = min(stats.maxHealth, stats.health + 25)
-        case .movement:
-            stats.movementSpeed *= 1.12
-        case .multishot:
-            stats.projectileCount = min(5, stats.projectileCount + 1)
-        case .armor:
-            stats.armor += 2
-        case .magnet:
-            stats.pickupRange += 45
-        case .repair:
-            stats.heal(45)
-        case .critical:
-            stats.critChance = min(0.75, stats.critChance + 0.1)
-        case .lifeSteal:
-            stats.lifeSteal = min(0.25, stats.lifeSteal + 0.03)
-        case .dodge:
-            stats.dodgeChance = min(0.45, stats.dodgeChance + 0.06)
-        case .regeneration:
-            stats.regeneration += 1.2
-        case .fortune:
-            stats.luck += 0.15
-        case .velocity:
-            stats.projectileSpeed *= 1.22
-        case .projectileSize:
-            stats.projectileSize *= 1.18
-        case .thorns:
-            stats.thorns += 8
-        case .overdrive:
-            stats.damage *= 1.35
-            stats.maxHealth = max(35, stats.maxHealth - 12)
-            stats.health = min(stats.health, stats.maxHealth)
-        case .greed:
-            stats.currencyMultiplier += 0.18
+    func detail(for rarity: UpgradeRarity) -> String {
+        let value = values[rarity.rawValue - 1]
+        return switch self {
+        case .maxHealth: "最大生命 +\(Int(value))，并回复同量生命"
+        case .regeneration: "生命再生 +\(formatted(value))/秒"
+        case .lifeSteal: "生命偷取 +\(Int(value))%"
+        case .armor: "护甲 +\(Int(value))"
+        case .dodge: "闪避 +\(Int(value))%"
+        case .movement: "移动速度 +\(Int(value))%"
+        case .damage: "全局伤害 +\(Int(value))%"
+        case .attackSpeed: "攻击速度 +\(Int(value))%"
+        case .critical: "暴击率 +\(Int(value))%"
+        case .criticalDamage: "暴击伤害 +\(Int(value))%"
+        case .weaponPower: "武装 +\(Int(value))"
+        case .engineering: "工程 +\(Int(value))"
+        case .erosion: "侵蚀 +\(Int(value))"
+        case .range: "射程 +\(Int(value))%"
+        case .projectileSpeed: "弹速 +\(Int(value))%"
+        case .areaSize: "范围尺寸 +\(Int(value))%"
+        case .knockback: "击退 +\(Int(value))%"
+        case .pickupRange: "拾取范围 +\(Int(value))"
+        case .luck: "幸运 +\(Int(value))"
+        case .harvesting: "每波回收 +\(Int(value))"
         }
     }
+
+    var symbol: String {
+        switch self {
+        case .maxHealth: "♥"
+        case .regeneration: "♧"
+        case .lifeSteal: "♦"
+        case .armor: "⬡"
+        case .dodge: "◌"
+        case .movement: "➤"
+        case .damage: "✦"
+        case .attackSpeed: "⌁"
+        case .critical: "⊕"
+        case .criticalDamage: "⌖"
+        case .weaponPower: "➤"
+        case .engineering: "⚙"
+        case .erosion: "☣"
+        case .range: "↔"
+        case .projectileSpeed: "»"
+        case .areaSize: "●"
+        case .knockback: "↟"
+        case .pickupRange: "◎"
+        case .luck: "♢"
+        case .harvesting: "◆"
+        }
+    }
+
+    var color: SKColor {
+        switch self {
+        case .maxHealth, .regeneration: .gameGreen
+        case .lifeSteal, .damage: .gameCoral
+        case .armor: .gameBlue
+        case .dodge, .movement, .knockback: .gameCyan
+        case .attackSpeed, .critical, .criticalDamage, .luck, .harvesting: .gameYellow
+        case .weaponPower, .projectileSpeed: .gameBlue
+        case .engineering: .gameGreen
+        case .erosion, .areaSize: .gamePurple
+        case .range, .pickupRange: .gamePink
+        }
+    }
+
+    var values: [CGFloat] {
+        switch self {
+        case .maxHealth: [6, 10, 16, 25]
+        case .regeneration: [0.6, 1, 1.7, 2.8]
+        case .lifeSteal: [1, 2, 3, 5]
+        case .armor: [1, 2, 3, 5]
+        case .dodge: [3, 5, 8, 12]
+        case .movement: [5, 8, 12, 18]
+        case .damage: [5, 8, 12, 18]
+        case .attackSpeed: [6, 10, 15, 22]
+        case .critical: [3, 5, 8, 12]
+        case .criticalDamage: [10, 18, 28, 45]
+        case .weaponPower, .engineering, .erosion: [2, 4, 7, 11]
+        case .range: [8, 14, 22, 35]
+        case .projectileSpeed: [10, 18, 28, 45]
+        case .areaSize: [6, 10, 16, 25]
+        case .knockback: [12, 20, 32, 50]
+        case .pickupRange: [25, 45, 75, 120]
+        case .luck: [6, 10, 16, 25]
+        case .harvesting: [4, 7, 11, 17]
+        }
+    }
+
+    func apply(to stats: inout PlayerStats, rarity: UpgradeRarity) {
+        let value = values[rarity.rawValue - 1]
+        switch self {
+        case .maxHealth:
+            stats.maxHealth += value
+            stats.health += value
+        case .regeneration:
+            stats.regeneration += value
+        case .lifeSteal:
+            stats.lifeSteal += value / 100
+        case .armor:
+            stats.armor += value
+        case .dodge:
+            stats.dodgeChance += value / 100
+        case .movement:
+            stats.movementSpeed *= 1 + value / 100
+        case .damage:
+            stats.globalDamage += value / 100
+        case .attackSpeed:
+            stats.attackSpeed += value / 100
+        case .critical:
+            stats.critChance += value / 100
+        case .criticalDamage:
+            stats.critMultiplier += value / 100
+        case .weaponPower:
+            stats.weaponPower += value
+        case .engineering:
+            stats.engineering += value
+        case .erosion:
+            stats.erosion += value
+        case .range:
+            stats.rangeMultiplier += value / 100
+        case .projectileSpeed:
+            stats.projectileSpeed *= 1 + value / 100
+        case .areaSize:
+            stats.projectileSize += value / 100
+        case .knockback:
+            stats.knockback += value / 100
+        case .pickupRange:
+            stats.pickupRange += value
+        case .luck:
+            stats.luck += value
+        case .harvesting:
+            stats.harvesting += Int(value)
+        }
+        stats.clamp()
+    }
+
+    private func formatted(_ value: CGFloat) -> String {
+        value.rounded() == value ? "\(Int(value))" : String(format: "%.1f", value)
+    }
+}
+
+struct UpgradeChoice {
+    let upgrade: Upgrade
+    let rarity: UpgradeRarity
+
+    var title: String { upgrade.title }
+    var detail: String { upgrade.detail(for: rarity) }
+    var symbol: String { upgrade.symbol }
+    var color: SKColor { rarity.color }
 }
 
 enum PhysicsCategory {
